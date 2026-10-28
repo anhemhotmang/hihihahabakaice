@@ -1,21 +1,21 @@
 -- ==========================================================
--- ICELAND HUB - FAKE AN EGG (GROW AN EGG)
--- Giao diện mới: Dark Mode + Iceland Blue | Tính năng: Full Auto
+-- ICELAND HUB - FAKE AN EGG
+-- Giao diện: Đen mờ, Viền chạy Đen-Trắng-Xám, Menu vừa phải lệch trái
 -- ==========================================================
 
--- [PHẦN 1: GIAO DIỆN UI MỚI (HIỆN ĐẠI HƠN)]
 local UIS = game:GetService("UserInputService")
 local CoreGui = game:GetService("CoreGui")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
 local Camera = Workspace.CurrentCamera
 local LocalPlayer = Players.LocalPlayer
 
 local UIModule = {}
 UIModule.__index = UIModule
-local GUI_NAME = "Iceland_Hub_Pro"
+local GUI_NAME = "Iceland_Hub_V3"
 
 local oldGui = CoreGui:FindFirstChild(GUI_NAME)
 if oldGui then oldGui:Destroy() end
@@ -31,88 +31,117 @@ local function applyTextSettings(textObject, minSize, maxSize)
     constraint.Parent = textObject
 end
 
-function UIModule.CreateWindow(titleText, footerText)
+-- Hàm tạo hiệu ứng viền chạy (Gradient)
+local function createAnimatedStroke(parentFrame)
+    local stroke = Instance.new("UIStroke")
+    stroke.Thickness = 2
+    stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+    stroke.Color = Color3.fromRGB(255, 255, 255) -- Màu gốc
+    stroke.Parent = parentFrame
+
+    -- Sử dụng UIGradient để tạo hiệu ứng chuyển màu Đen-Trắng-Xám
+    local gradient = Instance.new("UIGradient")
+    gradient.Color = ColorSequence.new{
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(50, 50, 50)),   -- Xám tối
+        ColorSequenceKeypoint.new(0.3, Color3.fromRGB(255, 255, 255)), -- Trắng
+        ColorSequenceKeypoint.new(0.6, Color3.fromRGB(10, 10, 10)),  -- Đen
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(150, 150, 150))  -- Xám nhạt
+    }
+    gradient.Parent = stroke
+
+    -- Hiệu ứng xoay vòng màu liên tục
+    task.spawn(function()
+        while stroke.Parent do
+            gradient.Rotation = (gradient.Rotation + 2) % 360
+            task.wait(0.02)
+        end
+    end)
+    return stroke
+end
+
+function UIModule.CreateWindow(titleText)
     local self = setmetatable({}, UIModule)
     local ApexHub = Instance.new("ScreenGui")
     ApexHub.Name = GUI_NAME
     ApexHub.Parent = CoreGui
     ApexHub.ResetOnSpawn = false
+    ApexHub.IgnoreGuiInset = true
     self.Gui = ApexHub
 
-    -- Bảng điều khiển chính
+    -- Bảng điều khiển chính (Kích thước vừa phải)
     local Main = Instance.new("Frame")
     Main.Parent = ApexHub
-    Main.BackgroundColor3 = Color3.fromRGB(15, 15, 20) -- Đen xám sang trọng
+    Main.BackgroundColor3 = Color3.fromRGB(10, 10, 10) -- Màu đen
+    Main.BackgroundTransparency = 0.25 -- Độ mờ (0 là đặc, 1 là trong suốt)
     Main.BorderSizePixel = 0
-    Main.Position = UDim2.new(0.5, -150, 0.5, -200)
-    Main.Size = UDim2.new(0, 300, 0, 100)
+    -- Vị trí: Lệch sang trái, thu nhỏ kích thước
+    Main.Position = UDim2.new(0, 20, 0.5, -150) 
+    Main.Size = UDim2.new(0, 240, 0, 80) 
     Main.Active = true
 
     local UICorner = Instance.new("UICorner")
-    UICorner.CornerRadius = UDim.new(0, 10)
+    UICorner.CornerRadius = UDim.new(0, 8)
     UICorner.Parent = Main
 
-    local UIStroke = Instance.new("UIStroke")
-    UIStroke.Thickness = 2
-    UIStroke.Color = Color3.fromRGB(0, 170, 255) -- Viền xanh Iceland
-    UIStroke.Parent = Main
+    -- Thêm hiệu ứng viền chạy Đen-Trắng-Xám
+    local UIStroke = createAnimatedStroke(Main)
 
     -- Tiêu đề
     local Title = Instance.new("TextLabel")
     Title.Parent = Main
-    Title.Size = UDim2.new(1, -60, 0, 45)
-    Title.Position = UDim2.new(0, 15, 0, 5)
+    Title.Size = UDim2.new(1, -50, 0, 35)
+    Title.Position = UDim2.new(0, 12, 0, 5)
     Title.Text = titleText or "ICELAND HUB"
-    Title.TextColor3 = Color3.fromRGB(0, 200, 255)
+    Title.TextColor3 = Color3.fromRGB(255, 255, 255) -- Màu trắng
     Title.Font = Enum.Font.GothamBold
     Title.BackgroundTransparency = 1
     Title.TextXAlignment = Enum.TextXAlignment.Left
-    applyTextSettings(Title, 14, 22)
+    applyTextSettings(Title, 12, 18)
     self.TitleLabel = Title
 
     -- Vùng chứa nội dung
     local Content = Instance.new("ScrollingFrame")
     Content.Parent = Main
-    Content.Position = UDim2.new(0, 10, 0, 50)
+    Content.Position = UDim2.new(0, 10, 0, 40)
     Content.Size = UDim2.new(1, -20, 0, 0)
     Content.BackgroundTransparency = 1
     Content.BorderSizePixel = 0
     Content.ScrollBarThickness = 2
-    Content.ScrollBarImageColor3 = Color3.fromRGB(0, 170, 255)
+    Content.ScrollBarImageColor3 = Color3.fromRGB(150, 150, 150) -- Xám
     Content.AutomaticCanvasSize = Enum.AutomaticSize.Y
     Content.CanvasSize = UDim2.new(0, 0, 0, 0)
     self.Content = Content
 
     local UIList = Instance.new("UIListLayout")
     UIList.Parent = Content
-    UIList.Padding = UDim.new(0, 8)
+    UIList.Padding = UDim.new(0, 6)
     UIList.HorizontalAlignment = Enum.HorizontalAlignment.Center
     self.UIList = UIList
 
-    -- Nút thu nhỏ (Minimize)
+    -- Nút thu nhỏ
     local isMinimized = false
-    local MINIMIZED_SIZE = UDim2.new(0, 300, 0, 45)
+    local MINIMIZED_SIZE = UDim2.new(0, 240, 0, 35)
     local MinBtn = Instance.new("TextButton")
-    MinBtn.Size = UDim2.new(0, 25, 0, 25)
-    MinBtn.Position = UDim2.new(1, -35, 0, 10)
-    MinBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+    MinBtn.Size = UDim2.new(0, 22, 0, 22)
+    MinBtn.Position = UDim2.new(1, -30, 0, 6)
+    MinBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 30) -- Đen xám
     MinBtn.Text = "-"
-    MinBtn.TextColor3 = Color3.fromRGB(0, 200, 255)
+    MinBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
     MinBtn.Font = Enum.Font.GothamBold
-    MinBtn.TextSize = 18
+    MinBtn.TextSize = 16
     MinBtn.Parent = Main
     local MinBtnCorner = Instance.new("UICorner")
-    MinBtnCorner.CornerRadius = UDim.new(0, 6)
+    MinBtnCorner.CornerRadius = UDim.new(0, 5)
     MinBtnCorner.Parent = MinBtn
 
-    local TITLE_PADDING = 60
-    local MAX_HEIGHT = 400
+    local TITLE_PADDING = 50
+    local MAX_HEIGHT = 350
     local function updateMainSize()
         if not isMinimized then
             local contentHeight = UIList.AbsoluteContentSize.Y
             local targetContentHeight = math.min(contentHeight, MAX_HEIGHT)
             Content.Size = UDim2.new(1, -20, 0, targetContentHeight)
-            Main.Size = UDim2.new(0, 300, 0, targetContentHeight + TITLE_PADDING)
+            Main.Size = UDim2.new(0, 240, 0, targetContentHeight + TITLE_PADDING)
         end
     end
     self.UpdateSize = updateMainSize
@@ -131,7 +160,7 @@ function UIModule.CreateWindow(titleText, footerText)
         end
     end)
 
-    -- Kéo thả UI
+    -- Kéo thả
     local dragToggle, dragInput, dragStart, startPos
     Main.InputBegan:Connect(function(input)
         if (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) then
@@ -158,63 +187,50 @@ function UIModule.CreateWindow(titleText, footerText)
     return self
 end
 
--- Nút Toggle kiểu mới (Thanh trượt Pill)
+-- Nút Toggle (Bật/Tắt) Tone Đen-Trắng
 function UIModule:CreateToggle(txt, defaultState, cb)
     local state = defaultState or false
     local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(0.95, 0, 0, 38)
-    btn.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
+    btn.Size = UDim2.new(0.95, 0, 0, 32)
+    btn.BackgroundColor3 = Color3.fromRGB(20, 20, 20) -- Đen mờ
+    btn.BackgroundTransparency = 0.1
     btn.Text = ""
     btn.Parent = self.Content
     local c = Instance.new("UICorner")
-    c.CornerRadius = UDim.new(0, 8)
+    c.CornerRadius = UDim.new(0, 6)
     c.Parent = btn
     local BtnStroke = Instance.new("UIStroke")
     BtnStroke.Thickness = 1
-    BtnStroke.Color = Color3.fromRGB(40, 40, 50)
+    BtnStroke.Color = Color3.fromRGB(60, 60, 60) -- Viền xám tối
     BtnStroke.Parent = btn
 
     local label = Instance.new("TextLabel")
-    label.Size = UDim2.new(1, -60, 1, 0)
-    label.Position = UDim2.new(0, 12, 0, 0)
+    label.Size = UDim2.new(1, -50, 1, 0)
+    label.Position = UDim2.new(0, 10, 0, 0)
     label.BackgroundTransparency = 1
     label.Text = txt
-    label.TextColor3 = Color3.fromRGB(220, 220, 220)
+    label.TextColor3 = Color3.fromRGB(200, 200, 200) -- Xám sáng
     label.Font = Enum.Font.Gotham
     label.TextXAlignment = Enum.TextXAlignment.Left
     label.Parent = btn
-    applyTextSettings(label, 10, 14)
-
-    -- Thanh trượt (Pill)
-    local pillBg = Instance.new("Frame")
-    pillBg.Size = UDim2.new(0, 36, 0, 20)
-    pillBg.Position = UDim2.new(1, -48, 0.5, -10)
-    pillBg.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
-    pillBg.Parent = btn
-    local pillCorner = Instance.new("UICorner")
-    pillCorner.CornerRadius = UDim.new(1, 0)
-    pillCorner.Parent = pillBg
+    applyTextSettings(label, 9, 13)
 
     local dot = Instance.new("Frame")
-    dot.Size = UDim2.new(0, 16, 0, 16)
-    dot.Position = UDim2.new(0, 2, 0.5, -8)
-    dot.BackgroundColor3 = Color3.fromRGB(150, 150, 150)
-    dot.Parent = pillBg
+    dot.Size = UDim2.new(0, 14, 0, 14)
+    dot.Position = UDim2.new(1, -25, 0.5, -7)
+    dot.BackgroundColor3 = Color3.fromRGB(80, 80, 80) -- Xám tối (Trạng thái tắt)
+    dot.Parent = btn
     local dotCorner = Instance.new("UICorner")
     dotCorner.CornerRadius = UDim.new(1, 0)
     dotCorner.Parent = dot
 
     local function updateState()
         if state then
-            pillBg.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
-            dot.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-            dot.Position = UDim2.new(1, -18, 0.5, -8)
-            label.TextColor3 = Color3.fromRGB(0, 200, 255)
+            dot.BackgroundColor3 = Color3.fromRGB(255, 255, 255) -- Trắng sáng (Trạng thái bật)
+            label.TextColor3 = Color3.fromRGB(255, 255, 255)
         else
-            pillBg.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
-            dot.BackgroundColor3 = Color3.fromRGB(150, 150, 150)
-            dot.Position = UDim2.new(0, 2, 0.5, -8)
-            label.TextColor3 = Color3.fromRGB(220, 220, 220)
+            dot.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+            label.TextColor3 = Color3.fromRGB(200, 200, 200)
         end
     end
     updateState()
@@ -228,19 +244,19 @@ function UIModule:CreateToggle(txt, defaultState, cb)
     return btn
 end
 
--- Nút bấm thường (Dùng cho Teleport khẩn cấp)
+-- Nút bấm thường
 function UIModule:CreateButton(txt, cb)
     local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(0.95, 0, 0, 34)
-    btn.BackgroundColor3 = Color3.fromRGB(0, 100, 180)
+    btn.Size = UDim2.new(0.95, 0, 0, 30)
+    btn.BackgroundColor3 = Color3.fromRGB(35, 35, 35) -- Xám đậm
     btn.Text = txt
     btn.TextColor3 = Color3.fromRGB(255, 255, 255)
     btn.Font = Enum.Font.GothamBold
     btn.Parent = self.Content
     local c = Instance.new("UICorner")
-    c.CornerRadius = UDim.new(0, 6)
+    c.CornerRadius = UDim.new(0, 5)
     c.Parent = btn
-    applyTextSettings(btn, 10, 14)
+    applyTextSettings(btn, 9, 13)
     btn.MouseButton1Click:Connect(function()
         if cb then cb() end
     end)
@@ -249,7 +265,7 @@ function UIModule:CreateButton(txt, cb)
 end
 
 -- ==========================================================
--- [PHẦN 2: LOGIC GAME & CÁC TÍNH NĂNG TỰ ĐỘNG]
+-- [PHẦN 2: LOGIC GAME & TÍNH NĂNG]
 -- ==========================================================
 
 local espEnabled = false
@@ -260,7 +276,7 @@ local autoRebirthEnabled = false
 local smartStealEnabled = false
 local espDrawings = {}
 
--- --- Hàm ESP ---
+-- Hàm ESP
 local function removeESP(player)
     if espDrawings[player] then
         if espDrawings[player].Box then espDrawings[player].Box:Remove() end
@@ -272,12 +288,12 @@ local function setupESP(player)
     if player == LocalPlayer then return end
     local box = Drawing.new("Square")
     box.Visible = false
-    box.Color = Color3.fromRGB(0, 200, 255)
+    box.Color = Color3.fromRGB(255, 255, 255) -- ESP màu trắng
     box.Thickness = 1
     box.Filled = false
     local tracer = Drawing.new("Line")
     tracer.Visible = false
-    tracer.Color = Color3.fromRGB(0, 200, 255)
+    tracer.Color = Color3.fromRGB(255, 255, 255)
     tracer.Thickness = 1
     espDrawings[player] = {Box = box, Tracer = tracer}
 end
@@ -323,7 +339,7 @@ RunService.RenderStepped:Connect(function()
     end
 end)
 
--- --- Hàm tìm Base ---
+-- Tìm Base
 local function getMyBasePart()
     local bases = Workspace:FindFirstChild("Bases")
     if not bases then return nil end
@@ -364,7 +380,7 @@ local function getMyBasePart()
     return nil
 end
 
--- --- Auto Hatch ---
+-- Auto Hatch
 task.spawn(function()
     while true do
         if autoHatchEnabled then
@@ -386,7 +402,7 @@ task.spawn(function()
     end
 end)
 
--- --- Equip Best ---
+-- Equip Best
 task.spawn(function()
     while true do
         if equipBestEnabled then
@@ -399,7 +415,7 @@ task.spawn(function()
     end
 end)
 
--- --- Instant Collect Hook ---
+-- Hook Instant Collect
 local function setupInstantCollectHook()
     task.spawn(function()
         local eggRemotes = ReplicatedStorage:WaitForChild("EggRemotes", 8)
@@ -437,12 +453,11 @@ local function setupInstantCollectHook()
 end
 setupInstantCollectHook()
 
--- --- Auto Rebirth (Bấm nút UI) ---
+-- Auto Rebirth
 local function AutoRebirth()
     task.spawn(function()
         while task.wait(2) do
             if not autoRebirthEnabled then continue end
-            -- BẠN CẦN SỬA ĐƯỜNG DẪN NÀY BẰNG CÁCH DÙNG F9 ĐỂ TÌM NÚT REBIRTH
             local rebirthBtn = LocalPlayer.PlayerGui:FindFirstChild("--- SỬA TÊN GUI REBIRTH ---", true)
             if rebirthBtn and (rebirthBtn:IsA("TextButton") or rebirthBtn:IsA("ImageButton")) then
                 rebirthBtn:Activate()
@@ -452,7 +467,7 @@ local function AutoRebirth()
     end)
 end
 
--- --- Smart Steal Pet & Run ---
+-- Smart Steal Pet
 local PRIORITY_KEYWORDS = {"Gold", "Diamond", "Rainbow", "Dragon", "Unicorn", "Kitsune", "Secret", "Divine", "Mythic", "Legendary"}
 local function GetPetPriority(petModel)
     local name = petModel.Name
@@ -513,10 +528,10 @@ local function SmartStealPet()
 end
 
 -- ==========================================================
--- [PHẦN 3: KHỞI TẠO GIAO DIỆN VÀ GẮN TÍNH NĂNG]
+-- [PHẦN 3: KHỞI TẠO GIAO DIỆN]
 -- ==========================================================
 
-local Hub = UIModule.CreateWindow("ICELAND HUB", "Phiên bản Pro")
+local Hub = UIModule.CreateWindow("ICELAND HUB")
 
 Hub:CreateToggle("Hiển thị người chơi (ESP)", false, function(on)
     espEnabled = on
@@ -539,7 +554,7 @@ Hub:CreateToggle("Tự động Tái Sinh (Rebirth)", false, function(on)
     if on then AutoRebirth() end
 end)
 
-Hub:CreateToggle("Trộm Pet Thông Minh (Ưu tiên pet xịn)", false, function(on)
+Hub:CreateToggle("Trộm Pet Thông Minh", false, function(on)
     smartStealEnabled = on
     if on then SmartStealPet() end
 end)
@@ -552,4 +567,4 @@ Hub:CreateButton("BAY LÊN TRỜI (THOÁT HIỂM)", function()
     end
 end)
 
-print("[ICELAND] Script Pro đã tải thành công!"),
+print("[ICELAND] Script đã tải thành công!")
