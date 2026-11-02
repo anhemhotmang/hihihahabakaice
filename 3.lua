@@ -504,6 +504,27 @@ local function whereIs(pos)
 	return prev or "?"
 end
 
+local function cleanPetName(value, fallback)
+	local raw = tostring(value or "")
+	local ok, result = pcall(function()
+		local out = {}
+		for _, cp in utf8.codes(raw) do
+			local cjk = (cp >= 0x3400 and cp <= 0x4DBF)
+				or (cp >= 0x4E00 and cp <= 0x9FFF)
+				or (cp >= 0xF900 and cp <= 0xFAFF)
+				or (cp >= 0x20000 and cp <= 0x2FA1F)
+			if not cjk then
+				out[#out + 1] = utf8.char(cp)
+			end
+		end
+		return table.concat(out):gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
+	end)
+	if ok and result ~= "" then
+		return result
+	end
+	return tostring(fallback or "Pet")
+end
+
 local function describe(record)
 	local directory = type(Assets) == "table" and Assets.Directory or nil
 	local entry = type(directory) == "table" and directory[tostring(record.AssetCategory)] or nil
@@ -511,7 +532,7 @@ local function describe(record)
 		Weight = tonumber(record.AssetScale) or 1, Where = whereIs(record.BottomCFrame.Position), State = record.State }
 
 	if type(entry) == "table" then
-		info.Name = tostring(entry.DisplayName or record.AssetCategory)
+		info.Name = cleanPetName(entry.DisplayName or record.AssetCategory, record.AssetCategory)
 		local icon = entry.Icon
 		if icon ~= nil and tostring(icon) ~= "" then
 			icon = tostring(icon)
@@ -533,6 +554,7 @@ local function describe(record)
 		info.Value = (tonumber(entry.EarningRate) or 0) * factor * mutation
 	end
 
+	info.Name = cleanPetName(info.Name, "Pet")
 	return info
 end
 
@@ -3895,6 +3917,10 @@ local function stealAndDeliver(uid, attempt)
 			stealAndDeliver(uid, attempt + 1)
 		else
 			blackout.off()
+			if state.Cancel then
+				status("Cancelled - choose another pet")
+				pcall(rebuild, true)
+			end
 		end
 	end)
 end
@@ -3954,7 +3980,7 @@ end
 local gui = make("ScreenGui", { Name = "T么i Kh么ng Ph岷 Hot Qu啤", DisplayOrder = 200000, ResetOnSpawn = false, ZIndexBehavior = Enum.ZIndexBehavior.Sibling, IgnoreGuiInset = true })
 gui.Parent = parentGui()
 
-local W, H, HEADER = 215, 226, 20
+local W, H, HEADER = 320, 360, 24
 local window = make("Frame", { Size = UDim2.fromOffset(W, H), Position = UDim2.new(0.5, -W / 2, 0.5, -H / 2), BackgroundColor3 = BG, BorderSizePixel = 0, ClipsDescendants = false })
 window.Parent = gui
 corner(window, 18)
@@ -3966,7 +3992,7 @@ header.Parent = window
 corner(header, 10)
 local title = text(header, {
 	Size = UDim2.new(1, -44, 1, 0), Position = UDim2.fromOffset(6, 0), Font = Enum.Font.GothamBlack, TextSize = 10,
-	TextColor3 = Color3.new(0, 0, 0), TextXAlignment = Enum.TextXAlignment.Left, Text = "T么i Kh么ng Ph岷 Hot Qu啤", TextScaled = true,
+	TextColor3 = Color3.new(0, 0, 0), TextXAlignment = Enum.TextXAlignment.Left, Text = "STEAL PANEL", TextScaled = true,
 })
 make("UITextSizeConstraint", { MaxTextSize = 10 }).Parent = title
 
@@ -3985,7 +4011,7 @@ body.Parent = window
 make("UIListLayout", { Padding = UDim.new(0, 3), SortOrder = Enum.SortOrder.LayoutOrder, FillDirection = Enum.FillDirection.Vertical }).Parent = body
 
 local list = make("ScrollingFrame", {
-	Size = UDim2.new(1, 0, 0, 130), LayoutOrder = 1, BackgroundColor3 = BG, BorderSizePixel = 0, ScrollBarThickness = 2, ScrollBarImageColor3 = SILVER,
+	Size = UDim2.new(1, 0, 0, 220), LayoutOrder = 1, BackgroundColor3 = BG, BorderSizePixel = 0, ScrollBarThickness = 2, ScrollBarImageColor3 = SILVER,
 	CanvasSize = UDim2.new(), AutomaticCanvasSize = Enum.AutomaticSize.Y,
 })
 list.Parent = body
@@ -3995,12 +4021,12 @@ make("UIListLayout", { Padding = UDim.new(0, 3), SortOrder = Enum.SortOrder.Layo
 make("UIPadding", { PaddingTop = UDim.new(0, 5), PaddingBottom = UDim.new(0, 5), PaddingLeft = UDim.new(0, 5), PaddingRight = UDim.new(0, 6) }).Parent = list
 
 local statusLabel = text(body, {
-	Size = UDim2.new(1, 0, 0, 12), LayoutOrder = 2, Font = Enum.Font.Gotham, TextSize = 9,
+	Size = UDim2.new(1, 0, 0, 14), LayoutOrder = 2, Font = Enum.Font.Gotham, TextSize = 9,
 	TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd, Text = "Pick a pet",
 })
 
 -- the panel only shows what happens to the egg, never timings or internals
-local PUBLIC = { ["Pick a pet"] = true, ["That egg is gone"] = true, ["Delivered"] = true, ["Delivery failed"] = true, ["Delivery failed, treadmill then retry"] = true, ["Cancelling"] = true }
+local PUBLIC = { ["Pick a pet"] = true, ["That egg is gone"] = true, ["Delivered"] = true, ["Delivery failed"] = true, ["Delivery failed, treadmill then retry"] = true, ["Cancelling"] = true, ["Cancelled - choose another pet"] = true }
 status = function(msg)
 	msg = tostring(msg)
 	if PUBLIC[msg] or string.sub(msg, 1, 9) == "Selected:" then
@@ -4026,8 +4052,18 @@ local function smallToggle(label, order)
 	stroke(b, 1, true)
 	return b
 end
+local sortRow = make("Frame", { Size = UDim2.new(1, 0, 0, 18), LayoutOrder = 3, BackgroundTransparency = 1 })
+sortRow.Parent = body
+local sortButton = make("TextButton", {
+	Size = UDim2.new(1, 0, 1, 0), BackgroundColor3 = BG, Font = Enum.Font.GothamBold,
+	TextSize = 10, TextColor3 = WHITE, Text = "Sort: Highest Value", AutoButtonColor = true,
+})
+sortButton.Parent = sortRow
+corner(sortButton, 8)
+stroke(sortButton, 1, true)
+
 local BLACKOUT_CODE = "YXSAE"
-local blackRow = make("Frame", { Size = UDim2.new(1, 0, 0, 16), LayoutOrder = 3, BackgroundTransparency = 1 })
+local blackRow = make("Frame", { Size = UDim2.new(1, 0, 0, 16), LayoutOrder = 4, BackgroundTransparency = 1 })
 blackRow.Parent = body
 local blackButton = make("TextButton", { Size = UDim2.new(0.58, -2, 1, 0), BackgroundColor3 = BG, Font = Enum.Font.GothamBold, TextSize = 9, TextColor3 = WHITE, Text = "Blackout: ON", AutoButtonColor = true })
 blackButton.Parent = blackRow
@@ -4062,13 +4098,16 @@ blackButton.MouseButton1Click:Connect(function()
 	blackout.Enabled = not blackout.Enabled
 	blackButton.Text = "Blackout: " .. (blackout.Enabled and "ON" or "OFF")
 end)
-local buttonRow = make("Frame", { Size = UDim2.new(1, 0, 0, 28), LayoutOrder = 4, BackgroundTransparency = 1 })
+local buttonRow = make("Frame", { Size = UDim2.new(1, 0, 0, 30), LayoutOrder = 5, BackgroundTransparency = 1 })
 buttonRow.Parent = body
 local refreshButton = bigButton(buttonRow, "Refresh", UDim2.new(0, 0, 0, 0), UDim2.new(0.4, -2, 1, 0))
 local stealButton = bigButton(buttonRow, "Steal", UDim2.new(0.4, 2, 0, 0), UDim2.new(0.6, -2, 1, 0))
 
 local selectedUid = nil
 local rows = {}
+local sortModes = { "Highest Value", "Lowest Value", "Name" }
+local sortModeIndex = 1
+local sortMode = sortModes[sortModeIndex]
 
 local function setSelected(uid)
 	selectedUid = uid
@@ -4086,11 +4125,16 @@ local function rebuild(force)
 		infos[#infos + 1] = describe(record)
 	end
 	table.sort(infos, function(a, b)
+		if sortMode == "Lowest Value" then
+			return a.Value < b.Value
+		elseif sortMode == "Name" then
+			return string.lower(a.Name) < string.lower(b.Name)
+		end
 		return a.Value > b.Value
 	end)
 	local parts = {}
 	for i, info in ipairs(infos) do
-		parts[i] = tostring(info.Uid) .. ":" .. tostring(info.Value) .. ":" .. info.Where
+		parts[i] = table.concat({ tostring(info.Uid), tostring(info.Value), info.Where, info.Name, info.Icon, tostring(info.Weight), tostring(info.State), tostring(info.Rarity) }, ":")
 	end
 	local sig = table.concat(parts, ",")
 	if not force and sig == listSig then
@@ -4139,6 +4183,16 @@ local function rebuild(force)
 	end
 end
 
+sortButton.MouseButton1Click:Connect(function()
+	sortModeIndex = (sortModeIndex % #sortModes) + 1
+	sortMode = sortModes[sortModeIndex]
+	sortButton.Text = "Sort: " .. sortMode
+	local okSort, errSort = pcall(rebuild, true)
+	if not okSort then
+		warn("[Steal Panel] sort error: " .. tostring(errSort))
+	end
+end)
+
 refreshButton.MouseButton1Click:Connect(function()
 	if viewState and viewState.Forced then
 		releaseView()
@@ -4162,6 +4216,7 @@ end)
 stealButton.MouseButton1Click:Connect(function()
 	if state.Busy then
 		state.Cancel = true
+		blackout.off()
 		status("Cancelling")
 		return
 	end
@@ -4236,11 +4291,11 @@ if not okFirst then
 end
 task.spawn(function()
 	while gui.Parent do
-		task.wait(4)
-		if not state.Busy and body.Visible then
+		task.wait(2)
+		if body.Visible then
 			local okLoop, errLoop = pcall(rebuild)
 			if not okLoop then
-				warn("[T么i Kh么ng Ph岷 Hot Qu啤] list error: " .. tostring(errLoop))
+				warn("[Steal Panel] list refresh error: " .. tostring(errLoop))
 			end
 		end
 	end
