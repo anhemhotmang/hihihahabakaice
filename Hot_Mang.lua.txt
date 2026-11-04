@@ -494,6 +494,10 @@ local function translateText(raw)
     if not raw or raw == "" then
         return raw
     end
+    -- Brand cleanup for every visible UI string (both EN and VI modes).
+    -- Keep internal Lua identifiers, framework keys and source URLs unchanged.
+    raw = raw:gsub("[Cc][Hh][Ii][Ll][Ll][Ii]", "Hot Mạng")
+             :gsub("[Vv][Ee][Nn][Yy][Xx]", "Hot Mạng Hub")
     local ck = State.Language .. "|" .. raw
     if FastCache[ck] then
         return FastCache[ck]
