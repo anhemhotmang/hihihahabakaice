@@ -317,6 +317,7 @@ local v9 = {
   Lighting = { "Brightness", "ClockTime", "FogColor", "FogEnd", "FogStart", "GeographicLatitude", "OutdoorAmbient", "Ambient", "ExposureCompensation", "ShadowSoftness", "GlobalShadows" },
   Atmosphere = { "Density", "Offset", "Color", "Decay", "Glare", "Haze" },
   Sky = { "SkyboxBk", "SkyboxDn", "SkyboxFt", "SkyboxLf", "SkyboxRt", "SkyboxUp", "StarCount", "SunTextureId", "MoonTextureId", "CelestialBodiesShown" },
+  Clouds = { "Cover", "Density", "Color" },
   PostEffect = { "Enabled", "Intensity", "Size", "Threshold", "Brightness", "Contrast", "Saturation", "TintColor", "FarIntensity", "NearIntensity", "FocusDistance", "InFocusRadius", "Spread" },
   GuiBase = { "Visible", "ZIndex", "LayoutOrder", "Active", "Draggable", "ClipsDescendants", "BackgroundColor3", "BackgroundTransparency", "BorderColor3", "BorderSizePixel", "Position", "Size", "Rotation", "SizeConstraint", "AutomaticSize", "AnchorPoint" },
   TextGui = { "Text", "TextColor3", "Font", "TextSize", "TextScaled", "TextWrapped", "TextXAlignment", "TextYAlignment", "RichText", "TextTransparency", "TextStrokeColor3", "TextStrokeTransparency", "LineHeight", "PlaceholderText", "PlaceholderColor3" },
@@ -359,6 +360,7 @@ local function f5(p7)
   if p7.ClassName == "Lighting" then f6(v9.Lighting) end
   if p7:IsA("Atmosphere") then f6(v9.Atmosphere) end
   if p7:IsA("Sky") then f6(v9.Sky) end
+  if p7:IsA("Clouds") then f6(v9.Clouds) end
   if p7:IsA("PostEffect") then f6(v9.PostEffect) end
   if p7:IsA("GuiObject") or p7:IsA("GuiBase2d") then f6(v9.GuiBase) end
   if p7:IsA("TextLabel") or p7:IsA("TextButton") or p7:IsA("TextBox") then f6(v9.TextGui) end
@@ -700,6 +702,7 @@ end
 local VFX_CLASSES = {
   "ParticleEmitter", "Beam", "Trail", "Fire", "Smoke", "Sparkles",
   "Explosion", "Light", "PointLight", "SpotLight", "SurfaceLight",
+  "PostEffect", "Atmosphere", "Sky", "Clouds",
   "Sound", "Animation", "AnimationController", "Animator",
   "Highlight", "SelectionBox", "SelectionSphere", "BillboardGui",
   "SurfaceGui", "Decal", "Texture", "SpecialMesh", "BlockMesh", "CylinderMesh",
@@ -1676,6 +1679,546 @@ end
 
 
 -- ============================================================
+-- HUY PHAM HUB — PHẦN 2.5: LEAK MỞ RỘNG
+-- Script / Map / Gui / Avatar / Info (đọc dữ liệu client đã tải về)
+-- ============================================================
+local Leaks = {}
+do
+  local starterPlayer = game:GetService("StarterPlayer")
+  local replicatedFirst = game:GetService("ReplicatedFirst")
+  local materialService = game:GetService("MaterialService")
+  local textChatService = game:GetService("TextChatService")
+  local statsService = game:GetService("Stats")
+  local soundService = game:GetService("SoundService")
+  local teamsService = game:GetService("Teams")
+
+  local function info(cls, name, props)
+    return { Cls = cls, Name = tostring(name), P = props or {}, Ch = {} }
+  end
+
+  local function safe(fn, fallback)
+    local ok, res = pcall(fn)
+    if ok then return res end
+    return fallback
+  end
+
+  local function fullName(inst)
+    return safe(function() return inst:GetFullName() end, tostring(inst))
+  end
+
+  local function clean(v)
+    if type(v) == "number" and (v ~= v or v == math.huge or v == -math.huge) then
+      return tostring(v)
+    end
+    return v
+  end
+
+  local function put(props, key, getter)
+    local ok, v = pcall(getter)
+    if ok and v ~= nil then
+      local s = f1(v)
+      if s == nil then s = tostring(v) end
+      props[key] = clean(s)
+    end
+  end
+
+  local function walk(rootList, test, build, limit)
+    local result, visited = {}, {}
+    for _, root in ipairs(rootList) do
+      pcall(function()
+        for _, d in ipairs(root:GetDescendants()) do
+          if not visited[d] then
+            local ok, hit = pcall(test, d)
+            if ok and hit then
+              visited[d] = true
+              local okb, item = pcall(build, d)
+              if okb and item then table.insert(result, item) end
+              if limit and #result >= limit then return end
+            end
+          end
+        end
+      end)
+      if limit and #result >= limit then break end
+    end
+    return result
+  end
+
+  local function worldRoots()
+    local list = { workspace, replicatedStorage, replicatedFirst, starterPack, starterGui, starterPlayer }
+    local pg = localPlayer:FindFirstChild("PlayerGui")
+    if pg then table.insert(list, pg) end
+    local ps = localPlayer:FindFirstChild("PlayerScripts")
+    if ps then table.insert(list, ps) end
+    local bp = localPlayer:FindFirstChild("Backpack")
+    if bp then table.insert(list, bp) end
+    return list
+  end
+
+  local function guiRoots()
+    local list = { starterGui }
+    local pg = localPlayer:FindFirstChild("PlayerGui")
+    if pg then table.insert(list, pg) end
+    return list
+  end
+
+  local function eachCharacter(fn)
+    for _, plr in ipairs(players:GetPlayers()) do
+      if plr.Character then pcall(fn, plr, plr.Character) end
+    end
+  end
+
+  -- ---------------------------------------------------------- SCRIPT
+  local function topScript(d, cls)
+    return d:IsA(cls) and not d:FindFirstAncestorWhichIsA("LuaSourceContainer")
+  end
+
+  function Leaks.localScripts()
+    return walk(worldRoots(), function(d) return topScript(d, "LocalScript") end, f7)
+  end
+
+  function Leaks.moduleScripts()
+    return walk(worldRoots(), function(d) return topScript(d, "ModuleScript") end, f7)
+  end
+
+  function Leaks.starterScripts()
+    local list = { starterPlayer }
+    local ps = localPlayer:FindFirstChild("PlayerScripts")
+    if ps then table.insert(list, ps) end
+    if localPlayer.Character then table.insert(list, localPlayer.Character) end
+    return walk(list, function(d) return topScript(d, "LuaSourceContainer") end, f7)
+  end
+
+  function Leaks.replicatedFirst()
+    local result = {}
+    for _, child in ipairs(replicatedFirst:GetChildren()) do
+      local s = f7(child)
+      if s then table.insert(result, s) end
+    end
+    return result
+  end
+
+  function Leaks.toolScripts()
+    return walk(worldRoots(), function(d)
+      return d:IsA("Tool") and d:FindFirstChildWhichIsA("LuaSourceContainer", true) ~= nil
+    end, f7)
+  end
+
+  function Leaks.scriptList()
+    return walk(worldRoots(), function(d) return d:IsA("LuaSourceContainer") end, function(d)
+      local props = { Class = d.ClassName, Path = fullName(d) }
+      put(props, "Disabled", function() return d.Disabled end)
+      put(props, "RunContext", function() return d.RunContext end)
+      return info("ScriptInfo", d.Name, props)
+    end, 4000)
+  end
+
+  -- ---------------------------------------------------------- MAP
+  function Leaks.terrain()
+    local terrain = workspace:FindFirstChildOfClass("Terrain")
+    if not terrain then return {} end
+    local props = {}
+    for _, name in ipairs({ "WaterColor", "WaterReflectance", "WaterTransparency", "WaterWaveSize", "WaterWaveSpeed", "Decoration", "GrassLength", "MaxExtents" }) do
+      put(props, name, function() return terrain[name] end)
+    end
+    for _, material in ipairs({ "Grass", "Sand", "Rock", "Mud", "Slate", "Ground", "Basalt", "Snow", "Ice", "Salt", "Sandstone", "Limestone", "Pavement", "CrackedLava", "Asphalt", "Cobblestone", "LeafyGrass", "Glacier", "WoodPlanks" }) do
+      put(props, "Color_" .. material, function() return terrain:GetMaterialColor(Enum.Material[material]) end)
+    end
+    return { info("Terrain", "Terrain", props) }
+  end
+
+  function Leaks.spawns()
+    return walk({ workspace }, function(d) return d:IsA("SpawnLocation") end, f7)
+  end
+
+  function Leaks.touchParts()
+    return walk({ workspace }, function(d)
+      return d:IsA("BasePart") and d:FindFirstChildOfClass("TouchTransmitter") ~= nil
+    end, function(d)
+      local props = { Path = fullName(d) }
+      put(props, "Position", function() return d.Position end)
+      put(props, "Size", function() return d.Size end)
+      put(props, "Color", function() return d.Color end)
+      put(props, "CanCollide", function() return d.CanCollide end)
+      put(props, "Transparency", function() return d.Transparency end)
+      put(props, "Anchored", function() return d.Anchored end)
+      return info("TouchPart", d.Name, props)
+    end, 3000)
+  end
+
+  function Leaks.clickDetectors()
+    return walk({ workspace }, function(d) return d:IsA("ClickDetector") end, function(d)
+      local part = d.Parent
+      local props = { Path = fullName(d) }
+      put(props, "MaxActivationDistance", function() return d.MaxActivationDistance end)
+      if part and part:IsA("BasePart") then put(props, "Position", function() return part.Position end) end
+      return info("ClickDetector", part and part.Name or d.Name, props)
+    end, 3000)
+  end
+
+  function Leaks.modelList()
+    local result = {}
+    for _, child in ipairs(workspace:GetChildren()) do
+      if (child:IsA("Model") or child:IsA("Folder")) and not players:GetPlayerFromCharacter(child) then
+        local props = { Class = child.ClassName }
+        put(props, "Children", function() return #child:GetChildren() end)
+        put(props, "Descendants", function() return #child:GetDescendants() end)
+        if child:IsA("Model") then
+          put(props, "Size", function() return child:GetExtentsSize() end)
+          put(props, "Position", function() return child:GetPivot().Position end)
+        end
+        table.insert(result, info("ModelInfo", child.Name, props))
+      end
+    end
+    return result
+  end
+
+  function Leaks.surfaceAppearances()
+    local seen = {}
+    return walk(worldRoots(), function(d) return d:IsA("SurfaceAppearance") end, function(d)
+      local key = tostring(d.ColorMap) .. "|" .. tostring(d.NormalMap)
+      if seen[key] then return nil end
+      seen[key] = true
+      local props = { Path = fullName(d) }
+      for _, name in ipairs({ "ColorMap", "NormalMap", "MetalnessMap", "RoughnessMap", "AlphaMode" }) do
+        put(props, name, function() return d[name] end)
+      end
+      return info("SurfaceAppearance", d.Name, props)
+    end, 3000)
+  end
+
+  function Leaks.materialVariants()
+    return walk({ materialService }, function(d) return d:IsA("MaterialVariant") end, function(d)
+      local props = {}
+      for _, name in ipairs({ "BaseMaterial", "ColorMap", "NormalMap", "MetalnessMap", "RoughnessMap", "StudsPerTile", "MaterialPattern" }) do
+        put(props, name, function() return d[name] end)
+      end
+      return info("MaterialVariant", d.Name, props)
+    end)
+  end
+
+  -- ---------------------------------------------------------- GUI
+  function Leaks.guiButtons()
+    return walk(guiRoots(), function(d) return d:IsA("TextButton") or d:IsA("ImageButton") end, function(d)
+      local props = { Class = d.ClassName, Path = fullName(d) }
+      put(props, "Visible", function() return d.Visible end)
+      put(props, "Text", function() return d.Text end)
+      put(props, "Image", function() return d.Image end)
+      return info("GuiButton", d.Name, props)
+    end, 4000)
+  end
+
+  function Leaks.imageIds()
+    local seen = {}
+    return walk(guiRoots(), function(d) return d:IsA("ImageLabel") or d:IsA("ImageButton") end, function(d)
+      local id = d.Image
+      if id == "" or seen[id] then return nil end
+      seen[id] = true
+      local props = { Image = id, Path = fullName(d) }
+      put(props, "ImageRectOffset", function() return d.ImageRectOffset end)
+      put(props, "ImageRectSize", function() return d.ImageRectSize end)
+      return info("ImageId", d.Name, props)
+    end, 4000)
+  end
+
+  function Leaks.hiddenScreenGuis()
+    return walk(guiRoots(), function(d) return d:IsA("ScreenGui") and d.Enabled == false end, f7)
+  end
+
+  function Leaks.hiddenFrames()
+    return walk(guiRoots(), function(d)
+      if not d:IsA("GuiObject") or d.Visible then return false end
+      local parent = d.Parent
+      return parent ~= nil and (not parent:IsA("GuiObject") or parent.Visible)
+    end, f7, 800)
+  end
+
+  function Leaks.fontsUsed()
+    local counts = {}
+    walk(guiRoots(), function(d)
+      return d:IsA("TextLabel") or d:IsA("TextButton") or d:IsA("TextBox")
+    end, function(d)
+      local key = tostring(d.Font)
+      counts[key] = (counts[key] or 0) + 1
+      return nil
+    end)
+    local result = {}
+    for font, n in pairs(counts) do
+      table.insert(result, info("FontInfo", font, { Count = n }))
+    end
+    table.sort(result, function(a, b) return a.P.Count > b.P.Count end)
+    return result
+  end
+
+  function Leaks.colorPalette()
+    local counts = {}
+    walk(guiRoots(), function(d)
+      return d:IsA("GuiObject") and d.BackgroundTransparency < 1
+    end, function(d)
+      local c = d.BackgroundColor3
+      local key = string.format("#%02X%02X%02X", math.floor(c.R * 255 + 0.5), math.floor(c.G * 255 + 0.5), math.floor(c.B * 255 + 0.5))
+      counts[key] = (counts[key] or 0) + 1
+      return nil
+    end)
+    local result = {}
+    for hex, n in pairs(counts) do
+      table.insert(result, info("ColorInfo", hex, { Count = n }))
+    end
+    table.sort(result, function(a, b) return a.P.Count > b.P.Count end)
+    while #result > 40 do table.remove(result) end
+    return result
+  end
+
+  -- ---------------------------------------------------------- AVATAR
+  function Leaks.accessories()
+    local result = {}
+    eachCharacter(function(plr, char)
+      for _, d in ipairs(char:GetChildren()) do
+        if d:IsA("Accessory") then
+          local s = f7(d)
+          if s then
+            s.P._Owner = plr.Name
+            table.insert(result, s)
+          end
+        end
+      end
+    end)
+    return result
+  end
+
+  function Leaks.clothing()
+    local result = {}
+    eachCharacter(function(plr, char)
+      for _, d in ipairs(char:GetChildren()) do
+        local props = { Class = d.ClassName, Owner = plr.Name }
+        if d:IsA("Shirt") then
+          put(props, "Template", function() return d.ShirtTemplate end)
+          table.insert(result, info("Clothing", plr.Name .. " Shirt", props))
+        elseif d:IsA("Pants") then
+          put(props, "Template", function() return d.PantsTemplate end)
+          table.insert(result, info("Clothing", plr.Name .. " Pants", props))
+        elseif d:IsA("ShirtGraphic") then
+          put(props, "Template", function() return d.Graphic end)
+          table.insert(result, info("Clothing", plr.Name .. " Graphic", props))
+        end
+      end
+    end)
+    return result
+  end
+
+  function Leaks.bodyColors()
+    local result = {}
+    eachCharacter(function(plr, char)
+      local bc = char:FindFirstChildOfClass("BodyColors")
+      if not bc then return end
+      local props = { Owner = plr.Name }
+      for _, name in ipairs({ "HeadColor3", "TorsoColor3", "LeftArmColor3", "RightArmColor3", "LeftLegColor3", "RightLegColor3" }) do
+        put(props, name, function() return bc[name] end)
+      end
+      table.insert(result, info("BodyColors", plr.Name, props))
+    end)
+    return result
+  end
+
+  function Leaks.playingAnims()
+    local result, seen = {}, {}
+    eachCharacter(function(plr, char)
+      local humanoid = char:FindFirstChildOfClass("Humanoid")
+      local animator = (humanoid and humanoid:FindFirstChildOfClass("Animator")) or char:FindFirstChildWhichIsA("Animator", true)
+      if not animator then return end
+      for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
+        local id = track.Animation and track.Animation.AnimationId or ""
+        if id ~= "" and not seen[id] then
+          seen[id] = true
+          local props = { AnimationId = id, Owner = plr.Name }
+          put(props, "Length", function() return track.Length end)
+          put(props, "Looped", function() return track.Looped end)
+          put(props, "Priority", function() return track.Priority end)
+          put(props, "Speed", function() return track.Speed end)
+          table.insert(result, info("AnimTrack", track.Name, props))
+        end
+      end
+    end)
+    return result
+  end
+
+  function Leaks.rigJoints()
+    local result = {}
+    eachCharacter(function(plr, char)
+      for _, d in ipairs(char:GetDescendants()) do
+        if d:IsA("Motor6D") then
+          local props = { Owner = plr.Name, Part0 = d.Part0 and d.Part0.Name or "", Part1 = d.Part1 and d.Part1.Name or "" }
+          put(props, "C0", function() return d.C0 end)
+          put(props, "C1", function() return d.C1 end)
+          table.insert(result, info("Motor6D", d.Name, props))
+        end
+      end
+    end)
+    return result
+  end
+
+  -- ---------------------------------------------------------- INFO / REMOTE
+  function Leaks.valueObjects()
+    return walk({ replicatedStorage, workspace, players }, function(d) return d:IsA("ValueBase") end, function(d)
+      local props = { Class = d.ClassName, Path = fullName(d) }
+      props.Value = tostring(safe(function() return d.Value end, nil))
+      return info("ValueObject", d.Name, props)
+    end, 4000)
+  end
+
+  local function dump(value, depth, seen)
+    local kind = typeof(value)
+    if kind == "string" then
+      if #value > 400 then return value:sub(1, 400) .. "..." end
+      return value
+    elseif kind == "number" then
+      return clean(value)
+    elseif kind == "boolean" then
+      return value
+    elseif kind == "table" then
+      if depth <= 0 or seen[value] then return "<table>" end
+      seen[value] = true
+      local out, count = {}, 0
+      for k, v in pairs(value) do
+        count = count + 1
+        if count > 150 then
+          out["..."] = "truncated"
+          break
+        end
+        out[tostring(k)] = dump(v, depth - 1, seen)
+      end
+      seen[value] = nil
+      return out
+    elseif kind == "Instance" then
+      return "<Instance " .. fullName(value) .. ">"
+    end
+    local s = f1(value)
+    if s ~= nil then return s end
+    return "<" .. kind .. ">"
+  end
+
+  function Leaks.moduleConfig()
+    local mods = walk({ replicatedStorage, replicatedFirst }, function(d)
+      return d:IsA("ModuleScript")
+    end, function(d) return d end, 400)
+
+    local result = {}
+    for _, mod in ipairs(mods) do
+      local done, ok, res = false, false, nil
+      task.spawn(function()
+        ok, res = pcall(require, mod)
+        done = true
+      end)
+      local started = os.clock()
+      while not done and os.clock() - started < 2 do task.wait() end
+      if done and ok and type(res) == "table" then
+        table.insert(result, info("ModuleData", mod.Name, { Path = fullName(mod), Data = dump(res, 4, {}) }))
+      end
+    end
+    return result
+  end
+
+  function Leaks.chatCommands()
+    local result = {}
+    pcall(function()
+      for _, d in ipairs(textChatService:GetDescendants()) do
+        if d:IsA("TextChatCommand") then
+          local props = { Path = fullName(d) }
+          put(props, "PrimaryAlias", function() return d.PrimaryAlias end)
+          put(props, "SecondaryAlias", function() return d.SecondaryAlias end)
+          put(props, "Enabled", function() return d.Enabled end)
+          table.insert(result, info("ChatCommand", d.Name, props))
+        elseif d:IsA("TextChannel") then
+          table.insert(result, info("ChatChannel", d.Name, { Path = fullName(d) }))
+        end
+      end
+    end)
+    return result
+  end
+
+  -- ---------------------------------------------------------- SPY
+  function Leaks.gameSettings()
+    local result = {}
+    local function add(group, name, getter)
+      local ok, v = pcall(getter)
+      if ok and v ~= nil then
+        table.insert(result, info("Setting", group .. "." .. name, { Value = tostring(v) }))
+      end
+    end
+    for _, name in ipairs({ "Gravity", "FallenPartsDestroyHeight", "StreamingEnabled", "StreamingMinRadius", "StreamingTargetRadius", "AirDensity", "GlobalWind", "AllowThirdPartySales" }) do
+      add("Workspace", name, function() return workspace[name] end)
+    end
+    for _, name in ipairs({ "CameraMode", "CameraMaxZoomDistance", "CameraMinZoomDistance", "CharacterWalkSpeed", "CharacterJumpPower", "CharacterJumpHeight", "CharacterUseJumpPower", "CharacterMaxSlopeAngle", "EnableMouseLockOption", "HealthDisplayDistance", "NameDisplayDistance", "LoadCharacterAppearance", "AutoJumpEnabled", "UserEmotesEnabled" }) do
+      add("StarterPlayer", name, function() return starterPlayer[name] end)
+    end
+    for _, name in ipairs({ "CharacterAutoLoads", "RespawnTime", "MaxPlayers", "BubbleChat", "ClassicChat" }) do
+      add("Players", name, function() return players[name] end)
+    end
+    for _, name in ipairs({ "Technology", "ClockTime", "TimeOfDay", "GlobalShadows", "Brightness", "EnvironmentDiffuseScale", "EnvironmentSpecularScale" }) do
+      add("Lighting", name, function() return lighting[name] end)
+    end
+    add("SoundService", "RespectFilteringEnabled", function() return soundService.RespectFilteringEnabled end)
+    add("SoundService", "AmbientReverb", function() return soundService.AmbientReverb end)
+    add("Teams", "Count", function() return #teamsService:GetChildren() end)
+    return result
+  end
+
+  function Leaks.cameraInfo()
+    local result = {}
+    local cam = workspace.CurrentCamera
+    if not cam then return result end
+    for _, name in ipairs({ "CameraType", "FieldOfView", "DiagonalFieldOfView", "MaxAxisFieldOfView", "CFrame", "Focus", "HeadLocked", "NearPlaneZ", "ViewportSize" }) do
+      local ok, v = pcall(function() return cam[name] end)
+      if ok and v ~= nil then
+        table.insert(result, info("Camera", name, { Value = tostring(v) }))
+      end
+    end
+    return result
+  end
+
+  function Leaks.serverStats()
+    local result = {}
+    local function add(name, value)
+      table.insert(result, info("Stat", name, { Value = tostring(value) }))
+    end
+    pcall(function() add("Network ping (ms)", math.floor(localPlayer:GetNetworkPing() * 1000)) end)
+    pcall(function() add("FPS", math.floor(1 / runService.RenderStepped:Wait())) end)
+    pcall(function() add("Players", #players:GetPlayers()) end)
+    pcall(function() add("MaxPlayers", players.MaxPlayers) end)
+    pcall(function() add("Memory (MB)", math.floor(statsService:GetTotalMemoryUsageMb())) end)
+    pcall(function() add("Instances", statsService.InstanceCount) end)
+    pcall(function() add("Game time (s)", math.floor(workspace.DistributedGameTime)) end)
+    pcall(function() add("PlaceVersion", game.PlaceVersion) end)
+    return result
+  end
+
+  -- ---------------------------------------------------------- DISCOVER
+  function Leaks.explorerTree()
+    local result = {}
+    local MAX, DEPTH = 3500, 3
+    local function visit(inst, depth, path)
+      for _, child in ipairs(inst:GetChildren()) do
+        if #result >= MAX then return end
+        local childPath = path .. "." .. child.Name
+        table.insert(result, info("Node", child.Name, { Class = child.ClassName, Path = childPath, Depth = depth, Children = #child:GetChildren() }))
+        if depth < DEPTH then visit(child, depth + 1, childPath) end
+      end
+    end
+    local services = { workspace, replicatedStorage, replicatedFirst, starterGui, starterPack, starterPlayer, lighting, soundService, teamsService }
+    local pg = localPlayer:FindFirstChild("PlayerGui")
+    if pg then table.insert(services, pg) end
+    for _, service in ipairs(services) do
+      if #result >= MAX then break end
+      pcall(function()
+        table.insert(result, info("Service", service.Name, { Class = service.ClassName, Children = #service:GetChildren() }))
+        visit(service, 1, service.Name)
+      end)
+    end
+    return result
+  end
+end
+
+
+-- ============================================================
 -- MENU (khung Skyro UI) + toàn bộ tính năng của HUY PHAM HUB
 -- ============================================================
 local function buildHub()
@@ -1889,7 +2432,7 @@ Gui.DisplayOrder = 100000
 Gui.Parent = guiParent
 
 local WIDTH = math.clamp(tonumber(v6.SkyroW) or 600, 520, 980)
-local HEIGHT = math.clamp(tonumber(v6.SkyroH) or 480, 400, 760)
+local HEIGHT = math.clamp(tonumber(v6.SkyroH) or 520, 400, 760)
 
 
 local Screen = frame(Gui, { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1 })
@@ -2329,7 +2872,7 @@ local Sidebar = frame(Window, {
 corner(Sidebar, 16)
 outline(Sidebar, STROKE, 1, 0)
 
-local TAB_HEIGHT, TAB_GAP = 30, 4
+local TAB_HEIGHT, TAB_GAP = 28, 3
 
 local TabScroll = Instance.new("ScrollingFrame")
 TabScroll.BackgroundTransparency = 1
@@ -2458,6 +3001,31 @@ do
 end
 
 
+local TabCursor = 8
+local TabGroups = 0
+
+local function newGroup(titleText)
+    TabGroups = TabGroups + 1
+    if TabGroups > 1 then
+        local rule = frame(TabScroll, {
+            Position = UDim2.fromOffset(14, TabCursor + 3),
+            Size = UDim2.new(1, -28, 0, 1),
+            ZIndex = 3,
+        })
+        gradient(rule, ACCENT_GRADIENT, 0, fade({ { 0, 0.75 }, { 0.5, 0.55 }, { 1, 1 } }))
+        TabCursor = TabCursor + 8
+    end
+
+    local head = label(TabScroll, 9, true, LILAC)
+    head.Position = UDim2.fromOffset(16, TabCursor + 2)
+    head.Size = UDim2.new(1, -24, 0, 12)
+    head.TextTransparency = 0.2
+    head.ZIndex = 3
+    head.Text = string.upper(titleText)
+
+    TabCursor = TabCursor + 18
+end
+
 local Pages = {}
 local Tabs = {}
 local currentTab = nil
@@ -2491,7 +3059,8 @@ local function newPage(name)
 end
 
 local function newTab(name, order)
-    local y = 8 + (order - 1) * (TAB_HEIGHT + TAB_GAP)
+    local y = TabCursor
+    TabCursor = TabCursor + TAB_HEIGHT + TAB_GAP
 
     local button = Instance.new("TextButton")
     button.Name = name
@@ -3407,17 +3976,28 @@ bind(runService.Heartbeat, function(dt)
 end)
 
 
+newGroup("copy")
 local CopyPage     = newTab("Copy", 1)
 local LoadPage     = newTab("Load", 2)
-local SettingPage  = newTab("Setting", 3)
-local AdminPage    = newTab("Admin", 4)
-local LeakPage     = newTab("Leak PC", 5)
-local VFXPage      = newTab("VFX", 6)
-local MediaPage    = newTab("Media", 7)
-local RemotePage   = newTab("Remote", 8)
-local SpyPage      = newTab("Spy", 9)
-local DiscoverPage = newTab("Discover", 10)
-local ClonePage    = newTab("Clone", 11)
+
+newGroup("leak")
+local LeakPage     = newTab("Leak PC", 3)
+local ScriptPage   = newTab("Script", 4)
+local MapPage      = newTab("Map", 5)
+local GuiPage      = newTab("Gui", 6)
+local AvatarPage   = newTab("Avatar", 7)
+local VFXPage      = newTab("VFX", 8)
+local MediaPage    = newTab("Media", 9)
+
+newGroup("scan")
+local RemotePage   = newTab("Remote", 10)
+local SpyPage      = newTab("Spy", 11)
+local DiscoverPage = newTab("Discover", 12)
+local ClonePage    = newTab("Clone", 13)
+
+newGroup("hub")
+local SettingPage  = newTab("Setting", 14)
+local AdminPage    = newTab("Admin", 15)
 
 local refreshLoad
 
@@ -3773,6 +4353,7 @@ local function scanButtons(page, setter, list, category)
     for _, info in ipairs(list) do
         UI.button(page, {
             name = info.name,
+            desc = info.desc,
             callback = function()
                 setter("⏳ Đang quét " .. info.name .. "...")
                 task.spawn(function()
@@ -3890,7 +4471,7 @@ end
 
 -- ================== TAB: LOAD ==================
 do
-    UI.section(LoadPage, "mục đã lưu")
+    UI.section(LoadPage, "MỤC ĐÃ LƯU")
     local _, row = UI.note(LoadPage, "Bạn Chưa Có Mục Coppy Nào Cả", DIM)
     emptyRow = row
 
@@ -3907,7 +4488,7 @@ end
 
 -- ================== TAB: SETTING ==================
 do
-    UI.section(SettingPage, "giao diện")
+    UI.section(SettingPage, "GIAO DIỆN")
 
     UI.toggle(SettingPage, {
         name = "📐 Bật Kéo Chỉnh Size GUI",
@@ -3942,7 +4523,7 @@ do
         end,
     })
 
-    UI.section(SettingPage, "🎨 màu giao diện")
+    UI.section(SettingPage, "🎨 MÀU GIAO DIỆN")
 
     local function applyTheme(color)
         local base = Fx.baseGradient
@@ -3993,10 +4574,10 @@ end
 
 -- ================== TAB: ADMIN ==================
 do
-    UI.section(AdminPage, "đội ngũ")
+    UI.section(AdminPage, "ĐỘI NGŨ")
     UI.roster(AdminPage, "👑 Huy Pham", { "Huy Pham" })
     UI.roster(AdminPage, "🛡️ ADMIN", { "Huy Pham" })
-    UI.roster(AdminPage, "🔰 MODERATOR (MOD)", { "Huy Pham" })
+    UI.roster(AdminPage, "🔰 MODERATOR (MOD)", { "Huy Pham", "ManhVo" })
 end
 
 -- ================== TAB: LEAK ==================
@@ -4209,6 +4790,46 @@ do
         end,
     })
 
+    UI.button(VFXPage, {
+        name = "🌈 LEAK EFFECT (Bloom / Blur / ColorCorrection...)" ,
+        desc = "Quét PostEffect và hiệu ứng môi trường trong Lighting, Map và GUI",
+        callback = function()
+            setVFXStatus("🌈 Đang quét Effect...")
+            task.spawn(function()
+                local effects = {}
+                local visited = {}
+                local effectClasses = { "PostEffect", "Atmosphere", "Sky", "Clouds" }
+                local roots = { workspace, replicatedStorage, lighting, starterGui }
+                local pg = localPlayer:FindFirstChild("PlayerGui")
+                if pg then table.insert(roots, pg) end
+                for _, root in ipairs(roots) do
+                    pcall(function()
+                        for _, d in ipairs(root:GetDescendants()) do
+                            if not visited[d] then
+                                local matched = false
+                                for _, className in ipairs(effectClasses) do
+                                    if d:IsA(className) then matched = true; break end
+                                end
+                                if matched then
+                                    visited[d] = true
+                                    local item = f7(d)
+                                    if item then table.insert(effects, item) end
+                                end
+                            end
+                        end
+                    end)
+                end
+                -- Lighting itself is a root and its direct children are included by GetDescendants.
+                if #effects == 0 then
+                    setVFXStatus("❌ Không tìm thấy Effect trong dữ liệu client đã tải")
+                    return
+                end
+                setVFXStatus("✅ Tìm thấy " .. #effects .. " Effect. Đang lưu...")
+                f25("Effect_Leak", "VFX", function() return effects end)
+            end)
+        end,
+    })
+
 end
 
 -- ================== TAB: MEDIA ==================
@@ -4411,6 +5032,14 @@ do
         end,
     })
 
+
+    UI.section(RemotePage, "THÊM")
+    local remoteExtras = {
+        { name = "💾 VALUE OBJECT", desc = "Int / String / Bool / Object Value + leaderstats", fn = Leaks.valueObjects, label = "Value_Objects" },
+        { name = "🧬 MODULE CONFIG (require)", desc = "chạy require từng module, dump bảng config", fn = Leaks.moduleConfig, label = "Module_Config" },
+        { name = "💬 CHAT COMMAND / CHANNEL", desc = "lệnh chat đăng ký trong TextChatService", fn = Leaks.chatCommands, label = "Chat_Commands" },
+    }
+    scanButtons(RemotePage, setRemoteStatus, remoteExtras, "Remote")
 end
 
 -- ================== TAB: SPY ==================
@@ -4429,6 +5058,14 @@ do
     }
 
     scanButtons(SpyPage, setSpyStatus, spyButtons, "Spy")
+
+    UI.section(SpyPage, "THÊM")
+    local spyExtras = {
+        { name = "⚙️ GAME SETTINGS", desc = "Workspace + StarterPlayer + Players + Lighting", fn = Leaks.gameSettings, label = "Game_Settings" },
+        { name = "🎥 CAMERA", desc = "FOV, CameraType, CFrame...", fn = Leaks.cameraInfo, label = "Camera" },
+        { name = "📊 SERVER STATS", desc = "ping, FPS, ram, số instance", fn = Leaks.serverStats, label = "Server_Stats" },
+    }
+    scanButtons(SpyPage, setSpyStatus, spyExtras, "Spy")
 end
 
 -- ================== TAB: DISCOVER ==================
@@ -4448,6 +5085,12 @@ do
     }
 
     scanButtons(DiscoverPage, setDiscoverStatus, discoverButtons, "Discover")
+
+    UI.section(DiscoverPage, "THÊM")
+    local discoverExtras = {
+        { name = "🌳 EXPLORER TREE (3 tầng)", desc = "cây thư mục các service chính", fn = Leaks.explorerTree, label = "Explorer_Tree" },
+    }
+    scanButtons(DiscoverPage, setDiscoverStatus, discoverExtras, "Discover")
 end
 
 -- ================== TAB: CLONE ==================
@@ -4465,6 +5108,79 @@ do
     }
 
     scanButtons(ClonePage, setCloneStatus, cloneButtons, "Clone")
+end
+
+-- ================== TAB: SCRIPT ==================
+do
+    local setScriptStatus = pageHeader(ScriptPage, "📜 SCRIPT LEAK",
+        "🎯 Leak script theo từng nơi:\n• LocalScript / ModuleScript / StarterPlayerScripts\n• ReplicatedFirst + script nằm trong Tool\n• Danh sách đường dẫn (không cần decompile)\n\n⚠️ Cần decompile để lấy source — không có thì chỉ lấy cấu trúc",
+        "Sẵn sàng leak script.")
+
+    local scriptButtons = {
+        { name = "📜 TẤT CẢ SCRIPT", desc = "LocalScript + ModuleScript + Script (cần decompile)", fn = copyScriptSource, label = "Script_All" },
+        { name = "🧩 LOCAL SCRIPT", desc = "chỉ LocalScript chạy trên client", fn = Leaks.localScripts, label = "LocalScripts" },
+        { name = "📦 MODULE SCRIPT", desc = "ModuleScript ở mọi nơi client thấy", fn = Leaks.moduleScripts, label = "ModuleScripts" },
+        { name = "🚀 STARTER / PLAYER SCRIPTS", desc = "StarterPlayerScripts, CharacterScripts, PlayerScripts", fn = Leaks.starterScripts, label = "Starter_Scripts" },
+        { name = "⚡ REPLICATED FIRST", desc = "script chạy đầu game (loading screen...)", fn = Leaks.replicatedFirst, label = "ReplicatedFirst" },
+        { name = "🛠️ SCRIPT TRONG TOOL", desc = "tool có script bên trong", fn = Leaks.toolScripts, label = "Tool_Scripts" },
+        { name = "🗂️ DANH SÁCH SCRIPT", desc = "tên + đường dẫn, không cần decompile", fn = Leaks.scriptList, label = "Script_List" },
+    }
+
+    scanButtons(ScriptPage, setScriptStatus, scriptButtons, "Script")
+end
+
+-- ================== TAB: MAP ==================
+do
+    local setMapStatus = pageHeader(MapPage, "🗺️ MAP LEAK",
+        "🎯 Leak chi tiết của map:\n• Terrain / Spawn / Touch part / ClickDetector\n• Danh sách model + kích thước\n• SurfaceAppearance / MaterialVariant (texture ID)\n\n✅ Mobile & PC đều chạy được",
+        "Sẵn sàng quét map.")
+
+    local mapButtons = {
+        { name = "⛰️ TERRAIN", desc = "nước, màu từng loại terrain, decoration", fn = Leaks.terrain, label = "Terrain" },
+        { name = "🏁 SPAWN LOCATION", desc = "điểm hồi sinh + team", fn = Leaks.spawns, label = "Spawns" },
+        { name = "💥 TOUCH PARTS", desc = "part có Touched (kill brick, teleport, coin...)", fn = Leaks.touchParts, label = "Touch_Parts" },
+        { name = "👆 CLICK DETECTOR", desc = "vị trí + tầm bấm", fn = Leaks.clickDetectors, label = "Click_Detectors" },
+        { name = "🏘️ DANH SÁCH MODEL", desc = "model / folder trong workspace + kích thước", fn = Leaks.modelList, label = "Model_List" },
+        { name = "🎨 SURFACE APPEARANCE", desc = "ColorMap / Normal / Metalness / Roughness", fn = Leaks.surfaceAppearances, label = "SurfaceAppearance" },
+        { name = "🧱 MATERIAL VARIANT", desc = "texture vật liệu custom của map", fn = Leaks.materialVariants, label = "MaterialVariants" },
+    }
+
+    scanButtons(MapPage, setMapStatus, mapButtons, "Map")
+end
+
+-- ================== TAB: GUI ==================
+do
+    local setGuiStatus = pageHeader(GuiPage, "🖼️ GUI LEAK",
+        "🎯 Leak giao diện game:\n• Nút bấm, image ID, SpriteSheet\n• ScreenGui / Frame đang ẩn\n• Font + bảng màu đang dùng\n\n💡 Copy nguyên StarterGui ở tab Copy",
+        "Sẵn sàng quét GUI.")
+
+    local guiButtons = {
+        { name = "🔘 TẤT CẢ NÚT BẤM", desc = "TextButton + ImageButton, text và ảnh", fn = Leaks.guiButtons, label = "Gui_Buttons" },
+        { name = "🖼️ IMAGE ID (icon, ảnh GUI)", desc = "kèm ImageRect của spritesheet", fn = Leaks.imageIds, label = "Gui_ImageIds" },
+        { name = "🙈 SCREENGUI ĐANG TẮT", desc = "menu ẩn, GUI chưa mở", fn = Leaks.hiddenScreenGuis, label = "Hidden_ScreenGuis" },
+        { name = "👻 FRAME ĐANG ẨN", desc = "frame Visible = false (shop, popup...)", fn = Leaks.hiddenFrames, label = "Hidden_Frames" },
+        { name = "🔤 FONT ĐÃ DÙNG", desc = "thống kê font trong GUI", fn = Leaks.fontsUsed, label = "Gui_Fonts" },
+        { name = "🎨 BẢNG MÀU GUI", desc = "40 màu nền hay dùng nhất", fn = Leaks.colorPalette, label = "Gui_Palette" },
+    }
+
+    scanButtons(GuiPage, setGuiStatus, guiButtons, "Gui")
+end
+
+-- ================== TAB: AVATAR ==================
+do
+    local setAvatarStatus = pageHeader(AvatarPage, "🧍 AVATAR LEAK",
+        "🎯 Leak nhân vật của mọi player trong server:\n• Accessory / Clothing / Body Colors\n• Animation đang chạy (AnimationId)\n• Rig Motor6D (C0 / C1)",
+        "Sẵn sàng quét avatar.")
+
+    local avatarButtons = {
+        { name = "🎩 ACCESSORY (mọi player)", desc = "phụ kiện + mesh/texture", fn = Leaks.accessories, label = "Accessories" },
+        { name = "👕 CLOTHING ID", desc = "áo, quần, graphic", fn = Leaks.clothing, label = "Clothing" },
+        { name = "🎨 BODY COLORS", desc = "màu 6 bộ phận cơ thể", fn = Leaks.bodyColors, label = "Body_Colors" },
+        { name = "💃 ANIMATION ĐANG CHẠY", desc = "AnimationId của mọi player lúc này", fn = Leaks.playingAnims, label = "Playing_Anims" },
+        { name = "🦴 RIG / MOTOR6D", desc = "C0 / C1 các khớp nhân vật", fn = Leaks.rigJoints, label = "Rig_Joints" },
+    }
+
+    scanButtons(AvatarPage, setAvatarStatus, avatarButtons, "Avatar")
 end
 
 -- ================== KHỞI TẠO ==================
